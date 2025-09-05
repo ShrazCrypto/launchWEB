@@ -1,20 +1,59 @@
 // server.js
 // npm i express compression morgan
+/* eslint-env node */
 import express from 'express';
 import compression from 'compression';
 import morgan from 'morgan';
 import fs from 'fs';
+import process from 'node:process';
 
-// Load data file
+// Use a fixed timestamp so generated sample data aligns with API defaults
+const FIXED_NOW = 1756909000;
+
+// Generate a small in-memory dataset when candles.json is missing
+function generateSampleData(seconds = 600, now = FIXED_NOW) {
+  const price = [];
+  const marketCap = [];
+  let priceVal = 0.043;
+  let capVal = priceVal * 1_000_000;
+
+  for (let i = seconds - 1; i >= 0; i--) {
+    const t = now - i;
+    const open = priceVal;
+    const high = open * (1 + Math.random() * 0.001);
+    const low = open * (1 - Math.random() * 0.001);
+    const close = low + Math.random() * (high - low);
+    const vol = Math.floor(Math.random() * 1000) + 100;
+
+    const capOpen = capVal;
+    const capHigh = capOpen * (1 + Math.random() * 0.0005);
+    const capLow = capOpen * (1 - Math.random() * 0.0005);
+    const capClose = capLow + Math.random() * (capHigh - capLow);
+
+    priceVal = close;
+    capVal = capClose;
+
+    price.push({ time: t, open, high, low, close, volume: vol });
+    marketCap.push({ time: t, open: capOpen, high: capHigh, low: capLow, close: capClose, volume: vol });
+  }
+
+  return {
+    price,
+    marketCap,
+    metadata: { startTime: price[0].time, endTime: price[price.length - 1].time }
+  };
+}
+
+// Load data file or fall back to generated sample data
 let candleData = null;
 try {
   const dataFile = JSON.parse(fs.readFileSync('data/candles.json', 'utf8'));
   candleData = dataFile;
   console.log(`Loaded ${candleData.price.length} data points from file`);
 } catch (error) {
-  console.error('Error loading data file:', error.message);
-  console.log('Please run: node generateDataFile.js');
-  process.exit(1);
+  console.warn('Error loading data file:', error.message);
+  console.warn('Using generated sample data');
+  candleData = generateSampleData();
 }
 
 // -------------------- Utils --------------------
@@ -23,21 +62,6 @@ const TF_SEC = {
   '1m':60, '5m':300, '15m':900, '30m':1800,
   '1h':3600, '4h':14400, '6h':21600, '24h':86400, '1w':604800,
 };
-
-function alignEnd(endSec, secPerBar) {
-  // last completed bar end (inclusive)
-  return Math.floor(endSec / secPerBar) * secPerBar - 1;
-}
-
-function bucketStart(t, s) { 
-  return Math.floor(t / s) * s; 
-}
-
-function hashStr(s) {
-  let h = 0;
-  for (let i=0;i<s.length;i++){ h=((h<<5)-h)+s.charCodeAt(i); h|=0; }
-  return Math.abs(h) || 1;
-}
 
 // -------------------- Aggregation --------------------
 function aggregateCandles(seconds, secPerBar) {
@@ -108,7 +132,7 @@ class FileDataService {
   }
 
   // Get paginated data for infinite scroll (only from existing data)
-  getPaginatedData({ mint, tf, start, end, type, page = 0, pageSize = 100 }) {
+  getPaginatedData({ tf, start, end, type, page = 0, pageSize = 100 }) {
     const secPerBar = TF_SEC[tf] || 60;
     const dataset = type === 'mcap' ? this.data.marketCap : this.data.price;
     
@@ -150,7 +174,6 @@ app.get('/api/candles/:mint', (req, res) => {
     const type = String(req.query.type || 'price'); // price | mcap
     
     // Use a fixed "now" time for deterministic data
-    const FIXED_NOW = 1756909000;
     const end = Number(req.query.end ?? FIXED_NOW);
     const limit = Number(req.query.limit ?? 100);
     const secPerBar = TF_SEC[tf] || 60;
@@ -193,7 +216,6 @@ app.get('/api/candles/:mint', (req, res) => {
  */
 app.get('/api/candles/:mint/paginated', (req, res) => {
   try {
-    const mint = req.params.mint;
     const tf = String(req.query.tf || '1s');
     const type = String(req.query.type || 'price');
     const start = Number(req.query.start);
@@ -205,14 +227,13 @@ app.get('/api/candles/:mint/paginated', (req, res) => {
       return res.status(400).json({ error: 'start and end required' });
     }
 
-    const data = service.getPaginatedData({ 
-      mint, 
-      tf, 
-      start, 
-      end, 
+    const data = service.getPaginatedData({
+      tf,
+      start,
+      end,
       type,
       page,
-      pageSize 
+      pageSize
     });
     
     res.json(data);
