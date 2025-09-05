@@ -7,11 +7,13 @@ import morgan from 'morgan';
 import fs from 'fs';
 import process from 'node:process';
 
+// Use a fixed timestamp so generated sample data aligns with API defaults
+const FIXED_NOW = 1756909000;
+
 // Generate a small in-memory dataset when candles.json is missing
-function generateSampleData(seconds = 600) {
+function generateSampleData(seconds = 600, now = FIXED_NOW) {
   const price = [];
   const marketCap = [];
-  const now = Math.floor(Date.now() / 1000);
   let priceVal = 0.043;
   let capVal = priceVal * 1_000_000;
 
@@ -60,7 +62,6 @@ const TF_SEC = {
   '1m':60, '5m':300, '15m':900, '30m':1800,
   '1h':3600, '4h':14400, '6h':21600, '24h':86400, '1w':604800,
 };
-
 
 // -------------------- Aggregation --------------------
 function aggregateCandles(seconds, secPerBar) {
@@ -173,7 +174,6 @@ app.get('/api/candles/:mint', (req, res) => {
     const type = String(req.query.type || 'price'); // price | mcap
     
     // Use a fixed "now" time for deterministic data
-    const FIXED_NOW = 1756909000;
     const end = Number(req.query.end ?? FIXED_NOW);
     const limit = Number(req.query.limit ?? 100);
     const secPerBar = TF_SEC[tf] || 60;
