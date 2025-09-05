@@ -1,0 +1,100 @@
+For all AI responses and suggestions in this project, cite sources for every detail, suggestion, and recommendation. Prioritize primary studies (e.g., academic papers, official GitHub repositories, and peer-reviewed articles) and include links where possible. Be thorough and reference multiple sources when applicable to ensure accuracy and completeness.
+
+## 🚀 Solana Launchpad Program – Summary
+
+### 1. Core Purpose
+A Solana smart contract that lets creators launch tokens with an automated market maker (AMM) pool.
+- Handles buys and sells of tokens against SOL
+- Price is discovered automatically through a bonding curve
+
+### 2. On-Chain Program
+- Written with Anchor v0.31.1
+- Program ID: 3rmPJ6F5D6wx3DFFdzD2HET5uBsDVTbkFpJqtAYpvmKb
+- Each token has one Pool account storing reserves and config
+
+**Pool Struct (on-chain data):**
+```rust
+pub struct Pool {
+  pub mint: Pubkey,          // Token mint
+  pub dev_wallet: Pubkey,    // Fee recipient
+  pub sol_reserve: u64,      // SOL in the pool
+  pub token_reserve: u64,    // Token balance
+  pub virtual_sol: u64,      // Fake SOL to smooth price
+  pub total_supply_raw: u64, // Total minted tokens
+  pub fee_bps: u16,          // Fee (basis points)
+  pub pool_bump: u8,         // PDA bump
+  pub vault_bump: u8,        // PDA bump
+}
+```
+
+**Instructions:**
+- `initialize_pool` → sets up a pool for a token
+- `buy` → swap SOL → token
+- `sell` → swap token → SOL
+
+### 3. Price Formula
+Derived, not stored.
+
+**Formula:**
+```
+Price = (sol_reserve + virtual_sol) / token_reserve
+```
+
+**Example:** (10 SOL + 33 virtual) / 1000 tokens = 0.043 SOL/token
+
+### 4. Off-Chain Indexer
+A TypeScript service that connects to Solana via RPC.
+- Subscribes to program logs and Pool accounts
+- On update:
+  - Fetches new Pool state
+  - Calculates price with the formula
+  - Stores result in Redis
+
+### 5. Redis
+In-memory cache used as a fast, real-time store.
+- Keys: `pool:<mint>` → latest price, slot, reserves
+- Pub/Sub: pushes "prices" events for live updates
+
+### 6. API Layer
+Express.js server with REST + WebSocket.
+- Reads from Redis and serves data to clients
+
+**Endpoints:**
+- `GET /token/:mint/price` → latest price
+- `GET /token/:mint` → full pool data (reserves, fee, etc)
+
+**WebSocket:**
+- Subscribed clients get pushed updates whenever indexer writes a new price
+
+### 7. SDK (TypeScript client library)
+Provides helpers for dApps to talk to the program.
+
+**Features:**
+- Program loader → connects Anchor provider + IDL
+- PDAs → derives pool/vault addresses
+- Price util → spotPrice() calculation
+
+### 8. Scripts
+- `create_token.ts` → mint a new token
+- `create_pool.ts` → set up a pool for a token
+- `buy.ts` / `sell.ts` → simulate trades
+- `check.ts` → inspect pool state
+
+### 9. Infrastructure
+- Uses Docker Compose to run Redis locally
+- RPC cluster = Devnet (for testing)
+- Future-ready for mainnet deployment
+
+### 10. Flow of Data
+1. Trader sends buy/sell tx → smart contract updates reserves
+2. Indexer sees update via RPC subscription
+3. Indexer recalculates price and writes it into Redis
+4. API fetches from Redis and serves to clients
+5. Frontend displays prices, charts, and live updates
+
+### ✅ Summary
+You've built a mini decentralized exchange launchpad:
+- **On-chain smart contract** → handles swaps & stores reserves
+- **Off-chain indexer** → keeps prices in sync
+- **Redis + API** → provides fast access for apps
+- **SDK + scripts** → make it easy for devs and testers to interact 
